@@ -9,7 +9,7 @@ return new class extends Migration
     /**
      * Run the migrations.
      */
-    public function up()
+    public function up(): void
     {
         Schema::create('products', function (Blueprint $table) {
             $table->id();
@@ -17,6 +17,13 @@ return new class extends Migration
             $table->string('image');
             $table->decimal('price', 8, 2);
             $table->string('unit');
+            
+            // 🎯 إضافة حقل الربط مع جدول التصنيفات
+            $table->foreignId('category_id')
+                ->nullable()
+                ->constrained('categories')
+                ->onDelete('set null'); // إذا حُذف القسم، لا تحذف المنتج بل يرجع قيمته null أو عام
+                
             $table->timestamps();
         });
     }

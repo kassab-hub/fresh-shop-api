@@ -11,4 +11,10 @@ class Product extends Model
 
     // ⬇️ أضف هذا السطر هنا لتفعيل الحقول المسموحة ⬇️
     protected $fillable = ['name', 'image', 'price', 'unit'];
+
+    public function category()
+    {
+        return $this->belongsTo(\App\Models\Category::class, 'category_id');
+    }
+
 }
