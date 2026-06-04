@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Order;
 use App\Models\OrderItem;
-use App\Models\Product; // 🎯 استيراد موديل المنتج للتحقق من الأسعار الحقيقية
+use App\Models\Product;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\JsonResponse;
 use Exception;
@@ -15,7 +15,7 @@ class OrderController extends Controller
 {
     public function checkout(Request $request): JsonResponse
     {
-        // 1. التحقق من الهيكل فقط (قمنا بإزالة حقل السعر لأنه سيؤخذ من السيرفر حصراً)
+        // 1. التحقق من هيكل البيانات القادمة من فلاتر
         $request->validate([
             'total_price'        => 'required|numeric',
             'items'              => 'required|array',
@@ -26,30 +26,40 @@ class OrderController extends Controller
         DB::beginTransaction();
 
         try {
-            $calculatedTotalPrice = 0; // متغير لحساب الإجمالي الفعلي بالسيرفر
-            $orderItemsData = []; // مصفوفة مؤقتة لتجهيز العناصر قبل حفظها
+            // 🎯 تحسين الأداء: جمع كل الـ IDs المطلوبة وجلب المنتجات باستعلام واحد فقط!
+            $productIds = collect($request->items)->pluck('product_id')->toArray();
+            $products = Product::whereIn('id', $productIds)->get()->keyBy('id');
 
-            // 2. التحقق من الأسعار الحقيقية من قاعدة البيانات
+            $calculatedTotalPrice = 0;
+            $orderItemsData = [];
+
+            // 2. معالجة العناصر والتحقق من الأسعار الحقيقية من الكولكشن المجلوب
             foreach ($request->items as $item) {
-                // جلب المنتج من قاعدة البيانات لقراءة سعره الأصلي الحقيقي
-                $product = Product::find($item['product_id']);
+                $product = $products->get($item['product_id']);
                 
+                // في حال حُذف المنتج فجأة أثناء المعالجة (حماية إضافية)
+                if (!$product) {
+                    return response()->json([
+                        'status'  => false,
+                        'message' => 'عذراً، أحد المنتجات في سلتك لم يعد متوفراً.'
+                    ], 404);
+                }
+
                 $dbPrice = $product->price;
                 $quantity = $item['quantity'];
                 $itemSubtotal = $dbPrice * $quantity;
 
-                // إضافة السعر الإجمالي لهذا العنصر للإجمالي الكلي للسيرفر
                 $calculatedTotalPrice += $itemSubtotal;
 
-                // تجهيز بيانات العنصر للحفظ بالسعر الحقيقي من الـ Database
+                // تجهيز البيانات للحفظ اللاحق
                 $orderItemsData[] = [
                     'product_id' => $item['product_id'],
                     'quantity'   => $quantity,
-                    'price'      => $dbPrice, // 🎯 السعر الآمن من السيرفر وليس من فلاتر
+                    'price'      => $dbPrice,
                 ];
             }
 
-            // 3. حماية إضافية: مقارنة الحسابات (مع التغاضي عن فروق الكسور الطفيفة)
+            // 3. حماية إضافية: مقارنة المجموع الكلي مع فلاتر
             if (abs($calculatedTotalPrice - $request->total_price) > 0.01) {
                 return response()->json([
                     'status'  => false,
@@ -57,17 +67,23 @@ class OrderController extends Controller
                 ], 400);
             }
 
-            // 4. حفظ الطلب الرئيسي بالإجمالي المحسوب بأمان
+            // 4. حفظ الطلب الرئيسي
             $order = Order::create([
                 'total_price' => $calculatedTotalPrice,
                 'status'      => 'pending',
             ]);
 
-            // 5. حفظ عناصر السلة
-            foreach ($orderItemsData as $itemData) {
-                $itemData['order_id'] = $order->id; // ربط العنصر برقم الطلب
-                OrderItem::create($itemData);
-            }
+            // 5. 🎯 تحسين الأداء: حفظ جميع عناصر السلة دفعة واحدة (Bulk Insert)
+            // نقوم بربط الـ order_id في المصفوفة مباشرة
+            $finalOrderItems = array_map(function($itemData) use ($order) {
+                $itemData['order_id'] = $order->id;
+                // إضافة التوقيتات لأن الـ insert لا يضيفها تلقائياً كـ create
+                $itemData['created_at'] = now();
+                $itemData['updated_at'] = now();
+                return $itemData;
+            }, $orderItemsData);
+
+            OrderItem::insert($finalOrderItems);
 
             DB::commit();
 
