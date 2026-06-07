@@ -13,6 +13,11 @@ return new class extends Migration
     {
         Schema::create('orders', function (Blueprint $table) {
             $table->id();
+            
+            // 🎯 السطر المضاف: ربط الطلب بالمستخدم وجعله nullable 
+            // (في حال رغبت مستقبلاً بالسماح بالشراء للزوار بدون تسجيل)
+            $table->foreignId('user_id')->nullable()->constrained('users')->onDelete('cascade');
+            
             $table->decimal('total_price', 8, 2);
             $table->string('status')->default('pending'); // حالة الطلب: قيد الانتظار، تم التوصيل...
             $table->timestamps();

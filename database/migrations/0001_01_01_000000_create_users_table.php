@@ -15,6 +15,7 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('email')->unique();
+            $table->string('phone')->nullable(); // 👈 أضفنا حقل الهاتف هنا ليكون اختيارياً في MySQL
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
             $table->rememberToken();

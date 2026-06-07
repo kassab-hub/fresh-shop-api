@@ -15,8 +15,9 @@ class OrderController extends Controller
 {
     public function checkout(Request $request): JsonResponse
     {
-        // 1. التحقق من هيكل البيانات القادمة من فلاتر
+        // 1. التحقق من هيكل البيانات القادمة (تحديث ليشمل رقم المستخدم)
         $request->validate([
+            'user_id'            => 'nullable|integer|exists:users,id', // 👈 التأكد من وجود المستخدم في MySQL
             'total_price'        => 'required|numeric',
             'items'              => 'required|array',
             'items.*.product_id' => 'required|exists:products,id',
@@ -59,7 +60,7 @@ class OrderController extends Controller
                 ];
             }
 
-            // 3. حماية إضافية: مقارنة المجموع الكلي مع فلاتر
+            // 3. حماية إضافية: مقارنة المجموع الكلي مع فلاتر/الويب
             if (abs($calculatedTotalPrice - $request->total_price) > 0.01) {
                 return response()->json([
                     'status'  => false,
@@ -67,17 +68,16 @@ class OrderController extends Controller
                 ], 400);
             }
 
-            // 4. حفظ الطلب الرئيسي
+            // 4. حفظ الطلب الرئيسي وتثبيت المستخدم
             $order = Order::create([
+                'user_id'     => $request->input('user_id'), // 👈 هنا يتم ربط الطلب بالمستخدم المسجل في قاعدة البيانات
                 'total_price' => $calculatedTotalPrice,
                 'status'      => 'pending',
             ]);
 
             // 5. 🎯 تحسين الأداء: حفظ جميع عناصر السلة دفعة واحدة (Bulk Insert)
-            // نقوم بربط الـ order_id في المصفوفة مباشرة
             $finalOrderItems = array_map(function($itemData) use ($order) {
                 $itemData['order_id'] = $order->id;
-                // إضافة التوقيتات لأن الـ insert لا يضيفها تلقائياً كـ create
                 $itemData['created_at'] = now();
                 $itemData['updated_at'] = now();
                 return $itemData;
